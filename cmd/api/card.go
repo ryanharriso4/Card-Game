@@ -127,7 +127,7 @@ func findCard(list []data.Card, cardID int) (int, data.Card) {
 	return -1, data.Card{}
 }
 
-func playCard(room *Room, player *PlayerState, action *PlayerAction) (ReasonLoss, bool, string) {
+func playCard(room *Room, player *PlayerState, action *PlayerAction) ([]GameEvent, error) {
 
 	index, card := findCard(player.Hand, action.CardID)
 	if index == -1 {

@@ -1,0 +1,22 @@
+CREATE TABLE cards (
+    id BIGSERIAL PRIMARY KEY, 
+    name VARCHAR(100) NOT NULL,
+    atk INT NOT NULL DEFAULT 0,
+    def INT NOT NULL DEFAULT 0,
+    type VARCHAR(50) NOT NULL,       
+    speed INT NOT NULL DEFAULT 1,    
+    is_permanent BOOLEAN NOT NULL DEFAULT FALSE,
+    tribute INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE keywords (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE, 
+    description TEXT NOT NULL         
+);
+
+CREATE TABLE decks (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT
+);

@@ -9,22 +9,39 @@ import (
 type GameEventType string
 type GamePhaseType string
 type GamePlayerAction string
-type GameLossReason string
+type GameEndReason string
+type InvalidActionReason string
+type Zone string
+type Player string
 
 const (
-	EventChangePhase GameEventType    = "PHASE_CHANGED"
-	EventStateChange GameEventType    = "STAT_CHANGE"
-	EventCardMoved   GameEventType    = "CARD_MOVED"
-	EventGameOver    GameEventType    = "GAME_OVER"
-	PhaseMain        GamePhaseType    = "MAIN_PHASE"
-	PhaseCombat      GamePhaseType    = "COMBAT_PHASE"
-	ActionPlay       GamePlayerAction = "PLAY_CARD"
-	ActionAttack     GamePlayerAction = "ATTACK"
-	ActionNextPhase  GamePlayerAction = "NEXT_PHASE"
-	OpponentDeckOut  GameLossReason   = "opponent decked out"
-	PlayerDeckOut    GameLossReason   = "you decked out"
-	PlayerDied       GameLossReason   = "you ran out of life points"
-	OpponentDied     GameLossReason   = "opponent ran out of life points"
+	EventChangePhase        GameEventType       = "PHASE_CHANGED"
+	EventStateChange        GameEventType       = "STAT_CHANGE"
+	EventCardMoved          GameEventType       = "CARD_MOVED"
+	EventGameOver           GameEventType       = "GAME_OVER"
+	EventInvalidAction      GameEventType       = "INVALID_ACTION"
+	EventInvalidAttack      GameEventType       = "INVALID_ATTACK"
+	EventCardDrawn          GameEventType       = "DRAW_CARD"
+	PhaseMain               GamePhaseType       = "MAIN_PHASE"
+	PhaseCombat             GamePhaseType       = "COMBAT_PHASE"
+	ActionPlay              GamePlayerAction    = "PLAY_CARD"
+	ActionAttack            GamePlayerAction    = "ATTACK"
+	ActionNextPhase         GamePlayerAction    = "NEXT_PHASE"
+	InvalidCardNotAvailable InvalidActionReason = "DONT_HAVE"
+	InvalidWrongTurn        InvalidActionReason = "WRONG_TURN"
+	InvalidAlreadySummoned  InvalidActionReason = "ALREADY_SUMMONED"
+	InvalidAlreadyAttacked  InvalidActionReason = "ALREADY_ATTACKED"
+	InvalidTarget           InvalidActionReason = "INVALID_TARGET"
+	InvalidPhase            InvalidActionReason = "INVALID_PHASE"
+	InvalidHasDefends       InvalidActionReason = "HAS_DEFENDERS"
+	GameEndDeckout          GameEndReason       = "DECK_OUT"
+	GameEndDamage           GameEndReason       = "DAMAGE"
+	ZoneBoard               Zone                = "BOARD"
+	ZoneGrave               Zone                = "GRAVE"
+	ZoneHand                Zone                = "HAND"
+	ZoneDeck                Zone                = "DECK"
+	PlayerYou               Player              = "YOU"
+	PlayerOpp               Player              = "OPP"
 )
 
 type ReasonLoss int
@@ -71,28 +88,50 @@ type GameStatePayload struct {
 }
 
 type GameEvent struct {
+	PlayerID string        `json:"-"`
+	Player   bool          `json:"player"`
 	Type     GameEventType `json:"type"`
 	Sequence int           `json:"sequence"`
 	Payload  interface{}   `json:"payload"`
 }
 
 type CardMovedPayload struct {
-	CardID   string `json:"card_id"`
-	FromZone string `json:"from_zone"`
-	ToZone   string `json:"to_zone"`
-	Index    int    `json:"index"`
+	Card     data.Card `json:"card"`
+	FromZone string    `json:"from_zone"`
+	ToZone   string    `json:"to_zone"`
+}
+
+type CardDrawnPayload struct {
+	Card data.Card `json:"card"`
 }
 
 type StatChangedPayload struct {
-	CardID   string `json:"card_id"`
+	CardID   int    `json:"card_id"`
 	Stat     string `json:"stat"`
 	NewValue int    `json:"new_value"`
 }
 
+type PhaseChangePayload struct {
+	Player     bool   `json:"your_turn"`
+	ChangeTurn bool   `json:"turn_changed"`
+	Phase      string `json:"phase"`
+}
+
+type InvalidActionPayload struct {
+	CardID int    `json:"card_id"`
+	Reason string `json:"reason"`
+}
+
+type InvalidAttackPayload struct {
+	CardID int    `json:"card_id"`
+	Reason string `json:"reason"`
+}
+
 type GameEndPayload struct {
-	Winner        bool   `json:"didWin"`
-	WinningReason string `json:"reason"`
-	RedirectURL   string `json:"redirect_url"`
+	Winner      bool   `json:"didWin"`
+	Reason      string `json:"reason"`
+	Message     string `json:"message"`
+	RedirectURL string `json:"redirect_url"`
 }
 
 type PlayerAction struct {
@@ -106,7 +145,7 @@ func (app *application) NewGame(p1ID, p2ID string) *GameState {
 		Turn:       1,
 		Players:    make(map[string]*PlayerState),
 		ActiveTurn: p1ID,
-		Phase:      "main",
+		Phase:      string(PhaseMain),
 	}
 
 	game.Players[p1ID] = &PlayerState{ID: p1ID, Health: 20, Deck: app.generateDeck(0)}

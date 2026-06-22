@@ -29,8 +29,8 @@ type Card struct {
 	IsPermanent bool        `json:"isPermanent"` //0 if a permanent 1 if not
 	Quantity    int         `json:"-"`
 	Tribute     int         `json:"tribute"`
-	CanAttack   bool        `json:"canAttack"`
 	Keywords    KeywordList `json:"keywords"`
+	HasAttacked bool        `json:"has_attacked"`
 }
 
 type CardKeyword struct {

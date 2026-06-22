@@ -79,118 +79,98 @@ func (app *application) run() {
 				continue
 			}
 
-			payload := GameStatePayload{}
-
 			var action PlayerAction
 			err := readJSON(msg.Payload, &action)
 			if err != nil {
-				payload.Accept = false
-				payload.Error = err.Error()
-				app.broadcastGS(room, payload)
+				fmt.Println("error error error")
 				break
 			}
 
-			if action.Type == string(ActionPlay) {
-				reason, accept, errorMsg := playCard(room, room.Game.Players[msg.Sender.ID], &action)
-				if reason != NOLOSS {
-					app.broadcastEnd(room, reason)
-				} else {
-					payload.Type = room.Game.Phase
-					payload.Accept, payload.Error = accept, errorMsg
-					app.broadcastGS(room, payload)
-				}
+			var events = []*GameEvent{}
 
+			if action.Type == string(ActionPlay) {
+				events = *playCard(room, room.Game.Players[msg.Sender.ID], &action)
 			}
 
 			if action.Type == string(ActionAttack) {
-				var reason ReasonLoss
-				var acceptable bool
-				var errMessage string
 
 				if action.Target == -1 {
-					reason, acceptable, errMessage = attackPlayer(room, room.Game.Players[msg.Sender.ID], &action)
+					events = *attackPlayer(room, room.Game.Players[msg.Sender.ID], &action)
 				} else {
-					acceptable, errMessage = attackCard(room, room.Game.Players[msg.Sender.ID], &action)
-				}
-
-				if reason != NOLOSS {
-					app.broadcastEnd(room, DAMAGE)
-				} else {
-					state := GameStatePayload{
-						Accept:    acceptable,
-						Type:      string(PhaseCombat),
-						GameState: room.Game,
-						Error:     errMessage,
-					}
-
-					app.broadcastGS(room, state)
+					events = *attackCard(room, room.Game.Players[msg.Sender.ID], &action)
 				}
 			}
 
 			if action.Type == string(ActionNextPhase) {
-
-				state := GameStatePayload{
-					Accept:    true,
-					Type:      string(EventChangePhase),
-					GameState: room.Game,
-					Error:     "na",
-				}
+				fmt.Printf("Action type: %q\n", action.Type)
 
 				if room.Game.ActiveTurn != msg.Sender.ID {
-					state.Accept = false
-					state.Error = "It is not your turn"
-					app.broadcastGS(room, state)
+					events = append(events, &GameEvent{Type: EventInvalidAction, Payload: InvalidActionPayload{CardID: -1, Reason: string(InvalidWrongTurn)}})
 				} else {
 
-					loss := NOLOSS
 					current := room.Game.Phase
 					var phase string
 					switch current {
 					case string(PhaseMain):
+						fmt.Println("main")
 						phase = string(PhaseCombat)
+						events = append(events, &GameEvent{Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseCombat)}})
 					case string(PhaseCombat):
+						fmt.Println("combat")
 						phase = string(PhaseMain)
 						room.Game.Turn += 1
 						for id := range room.Players {
 							if room.Game.ActiveTurn != id {
 								room.Game.ActiveTurn = id
-								loss = room.Game.Players[id].DrawCards(1)
+								room.Game.Players[id].DrawCardsEffect(1, &events)
 								break
 							}
 						}
-						state.Type = string(EventStateChange)
+
+						if len(events) != 0 {
+							events = append(events, &GameEvent{Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseMain)}})
+						}
 						room.Game.Summoned = false
 					}
 
 					room.Game.Phase = phase
 
-					if loss != NOLOSS {
-						app.broadcastEnd(room, loss)
-					} else {
-						app.broadcastGS(room, state)
-					}
 				}
 			}
 
+			app.broadcast(events, room)
+
 		}
 	}
 }
 
-func (app *application) broadcastGS(room *Room, state GameStatePayload) {
+func (app *application) broadcast(events []*GameEvent, room *Room) {
+	fmt.Println("Broadcasting")
 	for id, client := range room.Players {
+		playerEvents := make([]GameEvent, len(events))
 
-		if id == room.Game.ActiveTurn {
-			state.Turn = true
-		} else {
-			state.Turn = false
+		for i, ev := range events {
+			playerEvents[i] = *ev
+
+			if client.ID == room.Game.ActiveTurn {
+
+				playerEvents[i].Player = true
+			} else {
+				if ev.Type == EventCardDrawn {
+					playerEvents[i].Payload = nil
+				}
+				playerEvents[i].Player = false
+			}
+
+			if ev.Type == EventCardMoved && client.ID != ev.PlayerID {
+				playerEvents[i].Player = false
+			}
 		}
 
-		sanitizedState := room.Game.GetViewFor(id)
-		state.GameState = &sanitizedState
-
-		jsonBytes, err := json.Marshal(state)
+		jsonBytes, err := json.Marshal(playerEvents)
 		if err != nil {
 			app.logger.Error(err.Error())
+			continue
 		}
 
 		select {
@@ -202,49 +182,79 @@ func (app *application) broadcastGS(room *Room, state GameStatePayload) {
 	}
 }
 
-func (app *application) broadcastEnd(room *Room, reason ReasonLoss) {
+// func (app *application) broadcastGS(room *Room, state GameStatePayload) {
+// 	for id, client := range room.Players {
 
-	state := GameEndPayload{
-		RedirectURL: "/v1/healthcheck",
-	}
-	for id, client := range room.Players {
-		switch reason {
-		case DECKEDOUT:
-			if room.Game.ActiveTurn == id {
-				state.Winner = false
-				state.WinningReason = string(PlayerDeckOut)
-			} else {
-				state.Winner = true
-				state.WinningReason = string(OpponentDeckOut)
-			}
-		case DAMAGE:
-			if room.Game.ActiveTurn == id {
-				state.Winner = true
-				state.WinningReason = string(OpponentDied)
-			} else {
-				state.Winner = false
-				state.WinningReason = string(PlayerDied)
-			}
-		}
+// 		if id == room.Game.ActiveTurn {
+// 			state.Turn = true
+// 		} else {
+// 			state.Turn = false
+// 		}
 
-		jsonBytes, err := json.Marshal(state)
-		if err != nil {
-			app.logger.Error(err.Error())
-		}
+// 		if state.Type == string(EventStateChange) && state.Player == id {
 
-		select {
-		case client.send <- jsonBytes:
-		default:
-			client.hub.unregister <- client
-			close(client.send)
-			delete(room.Players, id)
-		}
-	}
+// 		}
 
-	for _, client := range room.Players {
-		client.hub.unregister <- client
-	}
-}
+// 		sanitizedState := room.Game.GetViewFor(id)
+// 		state.GameState = &sanitizedState
+
+// 		jsonBytes, err := json.Marshal(state)
+// 		if err != nil {
+// 			app.logger.Error(err.Error())
+// 		}
+
+// 		select {
+// 		case client.send <- jsonBytes:
+// 		default:
+// 			close(client.send)
+// 			delete(room.Players, id)
+// 		}
+// 	}
+// }
+
+// func (app *application) broadcastEnd(room *Room, reason ReasonLoss) {
+
+// 	state := GameEndPayload{
+// 		RedirectURL: "/v1/healthcheck",
+// 	}
+// 	for id, client := range room.Players {
+// 		switch reason {
+// 		case DECKEDOUT:
+// 			if room.Game.ActiveTurn == id {
+// 				state.Winner = false
+// 				state.WinningReason = string(PlayerDeckOut)
+// 			} else {
+// 				state.Winner = true
+// 				state.WinningReason = string(OpponentDeckOut)
+// 			}
+// 		case DAMAGE:
+// 			if room.Game.ActiveTurn == id {
+// 				state.Winner = true
+// 				state.WinningReason = string(OpponentDied)
+// 			} else {
+// 				state.Winner = false
+// 				state.WinningReason = string(PlayerDied)s
+// 			}
+// 		}
+
+// 		jsonBytes, err := json.Marshal(state)
+// 		if err != nil {
+// 			app.logger.Error(err.Error())
+// 		}
+
+// 		select {
+// 		case client.send <- jsonBytes:
+// 		default:
+// 			client.hub.unregister <- client
+// 			close(client.send)
+// 			delete(room.Players, id)
+// 		}
+// 	}
+
+// 	for _, client := range room.Players {
+// 		client.hub.unregister <- client
+// 	}
+// }
 
 func readJSON(payload []byte, action *PlayerAction) error {
 	var syntaxError *json.SyntaxError

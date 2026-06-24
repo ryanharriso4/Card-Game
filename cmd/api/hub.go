@@ -115,6 +115,7 @@ func (app *application) run() {
 						fmt.Println("main")
 						phase = string(PhaseCombat)
 						events = append(events, &GameEvent{Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseCombat)}})
+						room.Game.HasAttacked = make(map[int]struct{})
 					case string(PhaseCombat):
 						fmt.Println("combat")
 						phase = string(PhaseMain)

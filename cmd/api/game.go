@@ -64,12 +64,13 @@ type PlayerState struct {
 }
 
 type GameState struct {
-	Turn       int                     `json:"turn"`
-	Players    map[string]*PlayerState `json:"players"`
-	ActiveTurn string                  `json:"-"`
-	Phase      string                  `json:"phase"`
-	IsGameOver bool                    `json:"is_over"`
-	Summoned   bool                    `json:"has_summoned"`
+	Turn        int                     `json:"turn"`
+	Players     map[string]*PlayerState `json:"players"`
+	ActiveTurn  string                  `json:"-"`
+	Phase       string                  `json:"phase"`
+	IsGameOver  bool                    `json:"is_over"`
+	Summoned    bool                    `json:"has_summoned"`
+	HasAttacked map[int]struct{}        `json:"-"`
 }
 
 type GameStartPayload struct {

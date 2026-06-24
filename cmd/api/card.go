@@ -88,7 +88,7 @@ func destroy(players map[string]*PlayerState, action *PlayerAction, events *[]*G
 }
 
 // Attacking logic returns if card can attack and if the other card can depend in that order. Ex. True, False means good attacker bad defender
-func attack(AttackingPlayer *PlayerState, DefendingPlayer *PlayerState, attacking int, defending int) *[]*GameEvent {
+func attack(AttackingPlayer *PlayerState, DefendingPlayer *PlayerState, attacking int, defending int) (bool, *[]*GameEvent) {
 
 	var events []*GameEvent
 
@@ -113,7 +113,7 @@ func attack(AttackingPlayer *PlayerState, DefendingPlayer *PlayerState, attackin
 	}
 
 	if defendingIndex == -1 {
-		return &[]*GameEvent{
+		return false, &[]*GameEvent{
 			{
 				Type: EventInvalidAttack,
 				Payload: InvalidActionPayload{
@@ -126,7 +126,7 @@ func attack(AttackingPlayer *PlayerState, DefendingPlayer *PlayerState, attackin
 	}
 
 	if attackingIndex == -1 {
-		return &[]*GameEvent{
+		return false, &[]*GameEvent{
 			{
 				Type: EventInvalidAttack,
 				Payload: InvalidActionPayload{
@@ -136,20 +136,6 @@ func attack(AttackingPlayer *PlayerState, DefendingPlayer *PlayerState, attackin
 			},
 		}
 	}
-
-	if attackingCard.HasAttacked {
-		return &[]*GameEvent{
-			{
-				Type: EventInvalidAttack,
-				Payload: InvalidActionPayload{
-					CardID: attacking,
-					Reason: string(InvalidAlreadyAttacked),
-				},
-			},
-		}
-	}
-
-	attackingCard.HasAttacked = true
 
 	leftOverAttacking := attackingCard.Def - defendingCard.Atk
 	leftOverDefending := defendingCard.Def - attackingCard.Atk
@@ -166,7 +152,7 @@ func attack(AttackingPlayer *PlayerState, DefendingPlayer *PlayerState, attackin
 		events = append(events, &GameEvent{PlayerID: DefendingPlayer.ID, Type: EventCardMoved, Payload: CardMovedPayload{Card: defendingCard, FromZone: string(ZoneBoard), ToZone: string(ZoneGrave)}})
 	}
 
-	return &events
+	return true, &events
 
 }
 
@@ -256,6 +242,11 @@ func playCard(room *Room, player *PlayerState, action *PlayerAction) *[]*GameEve
 }
 
 func attackCard(room *Room, player *PlayerState, action *PlayerAction) *[]*GameEvent {
+
+	if _, exists := room.Game.HasAttacked[action.CardID]; exists {
+		return &[]*GameEvent{{Type: EventInvalidAttack, Payload: InvalidAttackPayload{CardID: action.CardID, Reason: string(InvalidAlreadyAttacked)}}}
+	}
+
 	if room.Game.ActiveTurn != player.ID {
 		return &[]*GameEvent{
 			{
@@ -288,13 +279,20 @@ func attackCard(room *Room, player *PlayerState, action *PlayerAction) *[]*GameE
 		}
 	}
 
-	events := attack(player, defendingPlayer, action.CardID, action.Target)
+	success, events := attack(player, defendingPlayer, action.CardID, action.Target)
+	if success {
+		room.Game.HasAttacked[action.CardID] = struct{}{}
+	}
 
 	return events
 
 }
 
 func attackPlayer(room *Room, player *PlayerState, action *PlayerAction) *[]*GameEvent {
+
+	if _, exists := room.Game.HasAttacked[action.CardID]; exists {
+		return &[]*GameEvent{{Type: EventInvalidAttack, Payload: InvalidAttackPayload{CardID: action.CardID, Reason: string(InvalidAlreadyAttacked)}}}
+	}
 
 	var defendingPlayer *PlayerState
 	for id, p := range room.Game.Players {
@@ -321,11 +319,7 @@ func attackPlayer(room *Room, player *PlayerState, action *PlayerAction) *[]*Gam
 		return &[]*GameEvent{{Type: EventInvalidAttack, Payload: InvalidAttackPayload{CardID: action.CardID, Reason: string(InvalidCardNotAvailable)}}}
 	}
 
-	if attackCard.HasAttacked {
-		return &[]*GameEvent{{Type: EventInvalidAttack, Payload: InvalidActionPayload{CardID: action.CardID, Reason: string(InvalidAlreadyAttacked)}}}
-	}
-
-	attackCard.HasAttacked = true
+	room.Game.HasAttacked[action.CardID] = struct{}{}
 
 	defendingPlayer.Health -= attackCard.Atk
 

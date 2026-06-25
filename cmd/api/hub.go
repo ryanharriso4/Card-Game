@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 )
 
 type Hub struct {
@@ -112,24 +113,24 @@ func (app *application) run() {
 					var phase string
 					switch current {
 					case string(PhaseMain):
-						fmt.Println("main")
+						newSeq := atomic.AddUint64(&room.Sequence, 1)
 						phase = string(PhaseCombat)
-						events = append(events, &GameEvent{Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseCombat)}})
+						events = append(events, &GameEvent{Sequence: int(newSeq), Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseCombat)}})
 						room.Game.HasAttacked = make(map[int]struct{})
 					case string(PhaseCombat):
-						fmt.Println("combat")
 						phase = string(PhaseMain)
 						room.Game.Turn += 1
 						for id := range room.Players {
 							if room.Game.ActiveTurn != id {
 								room.Game.ActiveTurn = id
-								room.Game.Players[id].DrawCardsEffect(1, &events)
+								room.Game.Players[id].DrawCardsEffect(room, 1, &events)
 								break
 							}
 						}
 
 						if len(events) != 0 {
-							events = append(events, &GameEvent{Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseMain)}})
+							newSeq := atomic.AddUint64(&room.Sequence, 1)
+							events = append(events, &GameEvent{Sequence: int(newSeq), Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseMain)}})
 						}
 						room.Game.Summoned = false
 					}
@@ -165,6 +166,19 @@ func (app *application) broadcast(events []*GameEvent, room *Room) {
 
 			if ev.Type == EventCardMoved && client.ID != ev.PlayerID {
 				playerEvents[i].Player = false
+			}
+
+			switch v := ev.Payload.(type) {
+			case GameEndPayload:
+				if v.Reason == string(GameEndDamage) && client.ID == room.Game.ActiveTurn {
+					v.Winner = true
+					playerEvents[i].Payload = v
+				}
+
+				if v.Reason == string(GameEndDeckout) && client.ID != room.Game.ActiveTurn {
+					v.Winner = true
+					playerEvents[i].Payload = v
+				}
 			}
 		}
 

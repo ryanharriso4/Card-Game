@@ -81,9 +81,9 @@ func (app *application) run() {
 			}
 
 			var action PlayerAction
-			err := readJSON(msg.Payload, &action)
-			if err != nil {
-				fmt.Println("error error error")
+			event := readJSON(room, msg.Payload, &action)
+			if event != nil {
+				app.broadcast(*event, room)
 				break
 			}
 
@@ -197,96 +197,68 @@ func (app *application) broadcast(events []*GameEvent, room *Room) {
 	}
 }
 
-// func (app *application) broadcastGS(room *Room, state GameStatePayload) {
-// 	for id, client := range room.Players {
-
-// 		if id == room.Game.ActiveTurn {
-// 			state.Turn = true
-// 		} else {
-// 			state.Turn = false
-// 		}
-
-// 		if state.Type == string(EventStateChange) && state.Player == id {
-
-// 		}
-
-// 		sanitizedState := room.Game.GetViewFor(id)
-// 		state.GameState = &sanitizedState
-
-// 		jsonBytes, err := json.Marshal(state)
-// 		if err != nil {
-// 			app.logger.Error(err.Error())
-// 		}
-
-// 		select {
-// 		case client.send <- jsonBytes:
-// 		default:
-// 			close(client.send)
-// 			delete(room.Players, id)
-// 		}
-// 	}
-// }
-
-// func (app *application) broadcastEnd(room *Room, reason ReasonLoss) {
-
-// 	state := GameEndPayload{
-// 		RedirectURL: "/v1/healthcheck",
-// 	}
-// 	for id, client := range room.Players {
-// 		switch reason {
-// 		case DECKEDOUT:
-// 			if room.Game.ActiveTurn == id {
-// 				state.Winner = false
-// 				state.WinningReason = string(PlayerDeckOut)
-// 			} else {
-// 				state.Winner = true
-// 				state.WinningReason = string(OpponentDeckOut)
-// 			}
-// 		case DAMAGE:
-// 			if room.Game.ActiveTurn == id {
-// 				state.Winner = true
-// 				state.WinningReason = string(OpponentDied)
-// 			} else {
-// 				state.Winner = false
-// 				state.WinningReason = string(PlayerDied)s
-// 			}
-// 		}
-
-// 		jsonBytes, err := json.Marshal(state)
-// 		if err != nil {
-// 			app.logger.Error(err.Error())
-// 		}
-
-// 		select {
-// 		case client.send <- jsonBytes:
-// 		default:
-// 			client.hub.unregister <- client
-// 			close(client.send)
-// 			delete(room.Players, id)
-// 		}
-// 	}
-
-// 	for _, client := range room.Players {
-// 		client.hub.unregister <- client
-// 	}
-// }
-
-func readJSON(payload []byte, action *PlayerAction) error {
+func readJSON(room *Room, payload []byte, action *PlayerAction) *[]*GameEvent {
 	var syntaxError *json.SyntaxError
 	var invalid *json.InvalidUnmarshalError
 
 	err := json.Unmarshal(payload, &action)
 	if errors.As(err, &syntaxError) {
-		return fmt.Errorf("There is an error at %d", syntaxError.Offset)
+		newSeq := atomic.AddUint64(&room.Sequence, 1)
+		line, col, contextSnippet := getJSONErrorContext(payload, syntaxError.Offset)
+		detailedReason := fmt.Sprintf("Syntax error at line %d, col %d: %s\nContext: %s",
+			line, col, syntaxError.Error(), contextSnippet)
+		return &[]*GameEvent{{Sequence: int(newSeq), Type: EventInvalidRequest, Payload: InvalidRequestPayload{Type: "Syntax Error", Reason: detailedReason}}}
 	}
 
 	if errors.Is(err, io.ErrUnexpectedEOF) {
-		return errors.New("JSON ended unexpectedly")
+		newSeq := atomic.AddUint64(&room.Sequence, 1)
+		return &[]*GameEvent{{Sequence: int(newSeq), Type: EventInvalidRequest, Payload: InvalidRequestPayload{Type: "Unexpected EOF", Reason: "JSON ended unexpectedly"}}}
 	}
 
 	if errors.As(err, &invalid) {
 		panic(err)
 	}
 
-	return nil
+	switch action.Type {
+	case string(ActionAttack), string(ActionNextPhase), string(ActionPlay):
+		return nil
+	default:
+		newSeq := atomic.AddUint64(&room.Sequence, 1)
+		return &[]*GameEvent{{Sequence: int(newSeq), Type: EventInvalidRequest, Payload: InvalidRequestPayload{Type: "Unexpected Response", Reason: fmt.Sprintf("Unknown Response Type %s", action.Type)}}}
+
+	}
+}
+
+func getJSONErrorContext(payload []byte, offset int64) (int, int, string) {
+	if offset < 0 || int(offset) > len(payload) {
+		return 1, 1, ""
+	}
+
+	line := 1
+	col := 1
+
+	// Calculate line and column numbers
+	for i := 0; i < int(offset); i++ {
+		if payload[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+
+	// Extract a snippet around the error (up to 20 characters before and after)
+	start := int(offset) - 20
+	if start < 0 {
+		start = 0
+	}
+
+	end := int(offset) + 20
+	if end > len(payload) {
+		end = len(payload)
+	}
+
+	// Highlight the exact error character using a carat indicator arrow
+	snippet := string(payload[start:end])
+	return line, col, snippet
 }

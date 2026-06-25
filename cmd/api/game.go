@@ -21,6 +21,7 @@ const (
 	EventGameOver           GameEventType       = "GAME_OVER"
 	EventInvalidAction      GameEventType       = "INVALID_ACTION"
 	EventInvalidAttack      GameEventType       = "INVALID_ATTACK"
+	EventInvalidRequest     GameEventType       = "INVALID_REQUEST"
 	EventCardDrawn          GameEventType       = "DRAW_CARD"
 	PhaseMain               GamePhaseType       = "MAIN_PHASE"
 	PhaseCombat             GamePhaseType       = "COMBAT_PHASE"
@@ -125,6 +126,11 @@ type InvalidActionPayload struct {
 
 type InvalidAttackPayload struct {
 	CardID int    `json:"card_id"`
+	Reason string `json:"reason"`
+}
+
+type InvalidRequestPayload struct {
+	Type   string `json:"type"`
 	Reason string `json:"reason"`
 }
 

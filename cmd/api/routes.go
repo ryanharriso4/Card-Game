@@ -28,9 +28,7 @@ func (app *application) routes() http.Handler {
 
 	router.Route("/v1/game", func(r chi.Router) {
 		r.Use(app.sessionManager.LoadAndSave)
-		//r.Use(app.requireAuthentication)
-		r.Get("/ws", app.serveWS)
-
+		r.With(app.limitActiveWebSockets).Get("/ws", app.serveWS)
 	})
 
 	router.Get("/v1/healthcheck", app.healthcheckHandler)

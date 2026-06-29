@@ -52,6 +52,7 @@ func (app *application) run() {
 				if err != nil {
 					app.logger.Error(err.Error())
 				}
+				app.logger.Info("New room started", "id", curRoomID)
 				curRoomID = fmt.Sprintf("room_%d", len(app.hub.rooms)+1)
 
 			}
@@ -200,6 +201,7 @@ func (app *application) broadcast(events []*GameEvent, room *Room) {
 func readJSON(room *Room, payload []byte, action *PlayerAction) *[]*GameEvent {
 	var syntaxError *json.SyntaxError
 	var invalid *json.InvalidUnmarshalError
+	var unmarshalTypeError *json.UnmarshalTypeError
 
 	err := json.Unmarshal(payload, &action)
 	if errors.As(err, &syntaxError) {
@@ -213,6 +215,12 @@ func readJSON(room *Room, payload []byte, action *PlayerAction) *[]*GameEvent {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		newSeq := atomic.AddUint64(&room.Sequence, 1)
 		return &[]*GameEvent{{Sequence: int(newSeq), Type: EventInvalidRequest, Payload: InvalidRequestPayload{Type: "Unexpected EOF", Reason: "JSON ended unexpectedly"}}}
+	}
+
+	if errors.As(err, &unmarshalTypeError) {
+		newSeq := atomic.AddUint64(&room.Sequence, 1)
+		detailedReason := fmt.Sprintf("Expected %s but got value at offset %d", unmarshalTypeError.Type.String(), unmarshalTypeError.Offset)
+		return &[]*GameEvent{{Sequence: int(newSeq), Type: EventInvalidRequest, Payload: InvalidRequestPayload{Type: "Type Error", Reason: detailedReason}}}
 	}
 
 	if errors.As(err, &invalid) {

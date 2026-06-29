@@ -71,3 +71,19 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func (app *application) limitActiveWebSockets(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case app.wsSemaphore <- struct{}{}:
+			defer func() {
+			}()
+			next.ServeHTTP(w, r)
+
+		default:
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "Too many active connections. Please try again later.", http.StatusTooManyRequests)
+			return
+		}
+	})
+}

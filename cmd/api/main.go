@@ -56,6 +56,8 @@ type application struct {
 	}
 
 	hub *Hub
+
+	wsSemaphore chan struct{}
 }
 
 func main() {
@@ -122,6 +124,7 @@ func main() {
 		sessionManager: sessionManagerSetUp(cfg, db),
 		models:         data.NewModels(db),
 		hub:            gameHub,
+		wsSemaphore:    make(chan struct{}, 10),
 	}
 
 	app.auth.provider = provider

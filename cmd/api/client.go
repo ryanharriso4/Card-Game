@@ -16,6 +16,7 @@ type Client struct {
 	hub    *Hub
 	conn   *websocket.Conn
 	send   chan []byte
+	IP     string
 }
 
 const (
@@ -64,7 +65,22 @@ func (c *Client) readPump() {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("error: %v", err)
 			}
+
 			break
+		}
+
+		c.hub.mu.Lock()
+		room, roomExists := c.hub.rooms[c.roomID]
+		c.hub.mu.Unlock()
+
+		if roomExists && room.limiter != nil {
+			if !room.limiter.Allow() {
+				log.Printf("Warning: Client %s spammed room %s. Dropping message.", c.ID, c.roomID)
+
+				notification := []byte(`{"type":"error","payload":"You are sending messages too fast!"}`)
+				_ = c.conn.WriteMessage(websocket.TextMessage, notification)
+				continue
+			}
 		}
 
 		c.hub.broadcast <- GameMessage{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -85,5 +86,24 @@ func (app *application) limitActiveWebSockets(next http.Handler) http.Handler {
 			http.Error(w, "Too many active connections. Please try again later.", http.StatusTooManyRequests)
 			return
 		}
+	})
+}
+
+func (app *application) HandleWebSocketHandshake(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		limiter := ipTracker.GetLimiter(ip)
+
+		if !limiter.Allow() {
+			http.Error(w, "429 Too Many Requests - Connection rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }

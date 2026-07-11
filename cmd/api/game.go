@@ -37,6 +37,7 @@ const (
 	InvalidHasDefends       InvalidActionReason = "HAS_DEFENDERS"
 	GameEndDeckout          GameEndReason       = "DECK_OUT"
 	GameEndDamage           GameEndReason       = "DAMAGE"
+	GameEndTimeout          GameEndReason       = "TIMEOUT"
 	ZoneBoard               Zone                = "BOARD"
 	ZoneGrave               Zone                = "GRAVE"
 	ZoneHand                Zone                = "HAND"

@@ -13,6 +13,7 @@ import (
 	"github.com/alexedwards/scs/postgresstore"
 	"github.com/alexedwards/scs/v2"
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
 	"golang.org/x/oauth2"
 )
@@ -40,6 +41,8 @@ type config struct {
 		burst   int
 		enabled bool
 	}
+
+	upgrader websocket.Upgrader
 }
 
 type application struct {
@@ -78,6 +81,9 @@ func main() {
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
 	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+
+	flag.IntVar(&cfg.upgrader.ReadBufferSize, "buffer-read", 1024, "Read buffer size")
+	flag.IntVar(&cfg.upgrader.WriteBufferSize, "buffer-write", 1024, "Write buffer size")
 
 	flag.Parse()
 
@@ -124,7 +130,7 @@ func main() {
 		sessionManager: sessionManagerSetUp(cfg, db),
 		models:         data.NewModels(db),
 		hub:            gameHub,
-		wsSemaphore:    make(chan struct{}, 10),
+		wsSemaphore:    make(chan struct{}, 1000),
 	}
 
 	app.auth.provider = provider

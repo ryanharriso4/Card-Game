@@ -1,18 +1,31 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
+	"time"
+
+	"golang.org/x/time/rate"
 )
+
+type TimeoutMessage struct {
+	RoomID   string
+	PlayerID string
+	TurnID   int
+}
 
 type Hub struct {
 	rooms      map[string]*Room
 	broadcast  chan GameMessage
 	register   chan *Client
 	unregister chan *Client
+	timeout    chan TimeoutMessage
+	mu         sync.Mutex
 }
 
 func newHub() *Hub {
@@ -21,6 +34,7 @@ func newHub() *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		rooms:      make(map[string]*Room),
+		timeout:    make(chan TimeoutMessage),
 	}
 }
 
@@ -33,7 +47,7 @@ func (app *application) run() {
 			client.roomID = curRoomID
 
 			if app.hub.rooms[curRoomID] == nil {
-				app.hub.rooms[curRoomID] = &Room{ID: curRoomID, Players: make(map[string]*Client)}
+				app.hub.rooms[curRoomID] = &Room{ID: curRoomID, Players: make(map[string]*Client), limiter: rate.NewLimiter(rate.Limit(3), 5)}
 			}
 
 			room := app.hub.rooms[curRoomID]
@@ -55,9 +69,14 @@ func (app *application) run() {
 				app.logger.Info("New room started", "id", curRoomID)
 				curRoomID = fmt.Sprintf("room_%d", len(app.hub.rooms)+1)
 
+				app.hub.startTurnTimer(room)
+
 			}
 
 		case client := <-app.hub.unregister:
+
+			<-app.wsSemaphore
+
 			roomID := client.roomID
 			room := app.hub.rooms[roomID]
 
@@ -80,6 +99,15 @@ func (app *application) run() {
 			if room == nil || room.Game == nil {
 				continue
 			}
+
+			// if !room.AllowAction() {
+			// 	errPayload := []byte(`{"type": "error", "message": "Too many actions in this room. Slow down!"}`)
+			// 	select {
+			// 	case msg.Sender.send <- errPayload:
+			// 	default:
+			// 	}
+			// 	continue
+			// }
 
 			var action PlayerAction
 			event := readJSON(room, msg.Payload, &action)
@@ -123,7 +151,7 @@ func (app *application) run() {
 						room.Game.Turn += 1
 						for id := range room.Players {
 							if room.Game.ActiveTurn != id {
-								room.Game.ActiveTurn = id
+								app.hub.passTurnAndRestartTimer(room)
 								room.Game.Players[id].DrawCardsEffect(room, 1, &events)
 								break
 							}
@@ -134,6 +162,7 @@ func (app *application) run() {
 							events = append(events, &GameEvent{Sequence: int(newSeq), Type: EventChangePhase, Payload: PhaseChangePayload{ChangeTurn: false, Phase: string(PhaseMain)}})
 						}
 						room.Game.Summoned = false
+
 					}
 
 					room.Game.Phase = phase
@@ -143,8 +172,66 @@ func (app *application) run() {
 
 			app.broadcast(events, room)
 
+		case msg := <-app.hub.timeout:
+			room := app.hub.rooms[msg.RoomID]
+			if room == nil || room.Game == nil {
+				continue
+			}
+
+			room.mu.Lock()
+			if room.Game.Turn == msg.TurnID {
+				newSeq := atomic.AddUint64(&room.Sequence, 1)
+				timeoutEvent := &GameEvent{
+					Sequence: int(newSeq),
+					Type:     EventGameOver,
+					Payload:  GameEndPayload{Reason: string(GameEndTimeout)},
+				}
+
+				eventsToBroadcast := []*GameEvent{timeoutEvent}
+				app.broadcast(eventsToBroadcast, room)
+			}
+			room.mu.Unlock()
 		}
 	}
+}
+
+func (h *Hub) startTurnTimer(room *Room) {
+	if room.CancelTimer != nil {
+		room.CancelTimer()
+	}
+
+	room.Game.Turn++
+
+	ctx, cancel := context.WithCancel(context.Background())
+	room.CancelTimer = cancel
+
+	go func() {
+		timer := time.NewTimer(120 * time.Second)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			h.timeout <- TimeoutMessage{
+				RoomID:   room.ID,
+				TurnID:   room.Game.Turn,
+				PlayerID: room.Game.ActiveTurn,
+			}
+		case <-ctx.Done():
+			return
+		}
+	}()
+}
+
+func (h *Hub) passTurnAndRestartTimer(room *Room) {
+
+	for _, player := range room.Game.Players {
+		if player.ID != room.Game.ActiveTurn {
+			room.Game.ActiveTurn = player.ID
+			break
+		}
+	}
+
+	h.startTurnTimer(room)
 }
 
 func (app *application) broadcast(events []*GameEvent, room *Room) {
@@ -176,7 +263,7 @@ func (app *application) broadcast(events []*GameEvent, room *Room) {
 					playerEvents[i].Payload = v
 				}
 
-				if v.Reason == string(GameEndDeckout) && client.ID != room.Game.ActiveTurn {
+				if v.Reason == string(GameEndDeckout) || v.Reason == string(GameEndTimeout) && client.ID != room.Game.ActiveTurn {
 					v.Winner = true
 					playerEvents[i].Payload = v
 				}
